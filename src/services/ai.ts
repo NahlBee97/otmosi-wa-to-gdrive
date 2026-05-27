@@ -1,10 +1,10 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { geminiApiKey } from '../config';
+import dotenv from 'dotenv';
 
-// Inisialisasi SDK Gemini dengan API Key dari .env
-const genAI = new GoogleGenerativeAI(geminiApiKey || '');
+dotenv.config();
 
-// Fungsi pembantu untuk mengubah buffer gambar menjadi format yang dipahami Gemini
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
+
 const bufferToGenerativePart = (buffer: Buffer, mimeType: string) => {
     return {
         inlineData: {
@@ -14,17 +14,30 @@ const bufferToGenerativePart = (buffer: Buffer, mimeType: string) => {
     };
 };
 
+// 🔥 MEKANISME KUNCI: Menyimpan status antrean agar request API tidak menumpuk di detik yang sama
+let aiProcessingPromise = Promise.resolve();
+
 export const generateImageDescription = async (buffer: Buffer, mimeType: string, allowedList: string[]): Promise<string> => {
+    // 1. Kunci antrean: Paksa foto ini menunggu sampai foto sebelumnya selesai diproses AI
+    await aiProcessingPromise;
+
+    // 2. Buat gembok baru untuk menahan foto berikutnya
+    let releaseLock: () => void;
+    aiProcessingPromise = new Promise(resolve => {
+        releaseLock = resolve as () => void;
+    });
+
     try {
         console.log('🤖 Menggandeng Gemini AI untuk mengklasifikasikan foto...');
         
-        const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview' });
+        // Beri jeda napas 3 detik sebelum menembak API Google agar terhindar dari limit 429
+        await new Promise(resolve => setTimeout(resolve, 3000));
+
+        const model = genAI.getGenerativeModel({ model: 'gemini-3.5-flash' });
         const imagePart = bufferToGenerativePart(buffer, mimeType);
         
-        // Mengubah array daftar penamaan menjadi teks string berbutir untuk prompt
         const daftarPilihanTeks = allowedList.map(item => `- ${item}`).join('\n');
         
-        // Kunci utamanya ada di instruksi ketat ini
         const prompt = `
             Analisis foto lapangan pekerjaan konstruksi/teknis ini.
             Tugasmu adalah MEMILIH SATU deskripsi yang paling cocok dan paling merepresentasikan aktivitas pada foto dari daftar pilihan yang disediakan di bawah ini.
@@ -42,17 +55,19 @@ export const generateImageDescription = async (buffer: Buffer, mimeType: string,
         const response = await result.response;
         const text = response.text().trim();
 
-        // Validasi tambahan: Pastikan hasil dari Gemini memang ada di dalam list kita
-        // Jika karena suatu alasan Gemini melanggar aturan, kita gunakan fallback
         if (allowedList.includes(text)) {
             return text;
         } else {
-            console.log(`⚠️ Gemini mengembalikan teks di luar list: "${text}". Menggunakan fallback.`);
-            return allowedList[0]; // Ambil pilihan pertama dari list sebagai cadangan aman
+            console.log(`⚠️ Gemini merespon di luar list: "${text}". Menggunakan cadangan pertama.`);
+            return allowedList[0]; 
         }
         
     } catch (error) {
         console.error('❌ Gemini AI gagal merespon:', error);
-        return 'foto lapangan tanpa keterangan'; 
+        // Jika limit tetap jebol, kembalikan pilihan pertama dari list Excel kamu
+        return allowedList[0]; 
+    } finally {
+        // 3. Wajib lepaskan kunci agar foto selanjutnya di dalam antrean bisa maju
+        releaseLock!();
     }
 };
