@@ -14,42 +14,45 @@ const bufferToGenerativePart = (buffer: Buffer, mimeType: string) => {
     };
 };
 
-export const generateImageDescription = async (buffer: Buffer, mimeType: string): Promise<string> => {
+export const generateImageDescription = async (buffer: Buffer, mimeType: string, allowedList: string[]): Promise<string> => {
     try {
-        console.log('🤖 Menggandeng Gemini AI untuk menganalisis foto...');
+        console.log('🤖 Menggandeng Gemini AI untuk mengklasifikasikan foto...');
         
-        // Menggunakan model Gemini 1.5 Flash yang optimal untuk teks & gambar secara cepat
         const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview' });
-
         const imagePart = bufferToGenerativePart(buffer, mimeType);
         
-        // Instruksi (Prompt) ketat agar AI hanya mengembalikan nama file tanpa basa-basi
+        // Mengubah array daftar penamaan menjadi teks string berbutir untuk prompt
+        const daftarPilihanTeks = allowedList.map(item => `- ${item}`).join('\n');
+        
+        // Kunci utamanya ada di instruksi ketat ini
         const prompt = `
-            Analisis foto lapangan pekerjaan konstruksi/teknis ini. 
-            Berikan deskripsi singkat yang paling merepresentasikan aktivitas teknis atau objek utama dalam foto tersebut untuk dijadikan nama file.
+            Analisis foto lapangan pekerjaan konstruksi/teknis ini.
+            Tugasmu adalah MEMILIH SATU deskripsi yang paling cocok dan paling merepresentasikan aktivitas pada foto dari daftar pilihan yang disediakan di bawah ini.
             
             Aturan ketat:
-            1. Gunakan Bahasa Indonesia.
-            2. Gunakan huruf kecil semua (lowercase).
-            3. Pisahkan setiap kata menggunakan spasi biasa ( ).
-            4. Maksimal 3 sampai 4 kata saja.
-            5. JANGAN memberikan teks penjelasan lain, jangan ada tanda baca, jangan ada kata "ini adalah", HANYA kembalikan nama filenya saja.
+            1. Kamu HANYA boleh memilih kata atau frasa yang ada di dalam "Daftar Pilihan Penamaan" di bawah.
+            2. JANGAN PERNAH membuat kata, singkatan, atau frasa baru sendiri yang tidak ada di daftar.
+            3. JANGAN memberikan teks penjelasan tambahan, jangan ada tanda baca, jangan ada kalimat pengantar. HANYA kembalikan frasa teks yang kamu pilih secara persis.
             
-            Contoh hasil: 
-            pengecoran lantai dasar
-            pemasangan pipa pvc
-            inspeksi alat berat
-            pemasangan besi tiang
+            Daftar Pilihan Penamaan:
+            ${daftarPilihanTeks}
         `;
 
         const result = await model.generateContent([prompt, imagePart]);
         const response = await result.response;
-        const text = response.text();
+        const text = response.text().trim();
 
-        // Pembersihan karakter newline atau spasi liar dari respon AI
-        return text.trim().replace(/\s+/g, ' ');
+        // Validasi tambahan: Pastikan hasil dari Gemini memang ada di dalam list kita
+        // Jika karena suatu alasan Gemini melanggar aturan, kita gunakan fallback
+        if (allowedList.includes(text)) {
+            return text;
+        } else {
+            console.log(`⚠️ Gemini mengembalikan teks di luar list: "${text}". Menggunakan fallback.`);
+            return allowedList[0]; // Ambil pilihan pertama dari list sebagai cadangan aman
+        }
+        
     } catch (error) {
         console.error('❌ Gemini AI gagal merespon:', error);
-        return 'foto lapangan tanpa keterangan'; // Fallback jika AI error
+        return 'foto lapangan tanpa keterangan'; 
     }
 };
