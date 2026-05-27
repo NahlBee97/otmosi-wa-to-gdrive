@@ -2,6 +2,7 @@ import { Client, LocalAuth } from 'whatsapp-web.js';
 import qrcode from 'qrcode-terminal';
 import { getOrCreateFolder, uploadPhoto } from './drive';
 import { myToId, parentFolderId } from '../config';
+import { generateImageDescription } from './ai';
 
 export const initializeWhatsApp = () => {
     console.log('Inisialisasi WhatsApp Client...');
@@ -37,36 +38,29 @@ export const initializeWhatsApp = () => {
                 console.log('\n📥 Menerima file media...');
                 
                 try {
-                    // 1. Unduh foto dari WhatsApp ke memori (buffer)
                     const media = await msg.downloadMedia();
                     const buffer = Buffer.from(media.data, 'base64');
                     
-                    // 2. Bedah caption untuk mencari Nama Folder dan Nama File
-                    // Memisahkan teks berdasarkan tanda hubung "-"
-                    const caption = msg.body || 'Uncategorized - Tanpa Keterangan';
-                    const parts = caption.split('-');
+                    // Saring lokasi dari caption teks. Contoh: "Hu'u" atau "Sila"
+                    const caption = msg.body || 'Umum';
+                    const folderName = caption.split('-')[0].trim();
                     
-                    const folderName = parts[0] ? parts[0].trim() : 'Uncategorized';
-                    const description = parts[1] ? parts[1].trim() : 'Foto Lapangan';
+                    // 🔥 SIHIR AI: Biarkan Gemini yang menentukan nama deskripsi berdasarkan isi foto
+                    const aiDescription = await generateImageDescription(buffer, media.mimetype);
                     
-                    // Buat nama file unik dengan timestamp agar tidak saling menimpa
-                    const timestamp = new Date().getTime();
-                    const fileName = `${description}_${timestamp}.jpg`;
+                    // Buat format nama file: tanggal_deskripsiai.jpg
+                    const today = new Date().toISOString().slice(0, 10); // Format YYYY-MM-DD
+                    const fileName = `${today}_${aiDescription}.jpg`;
 
-                    // 3. Buat atau cari folder di Google Drive
                     const folderId = await getOrCreateFolder(folderName, parentFolderId as string);
+                    await uploadPhoto(buffer, fileName, media.mimetype, folderId);
                     
-                    // 4. Upload foto ke folder tersebut
-                    await uploadPhoto(buffer, fileName, media.mimetype, folderId as string);
-                    
-                    console.log('🎉 Selesai! Foto berhasil diamankan ke Google Drive.');
-                    
-                    // Bot membalas pesannya sendiri sebagai notifikasi sukses
-                    msg.reply(`✅ Foto berhasil diupload ke folder: *${folderName}*`);
+                    console.log(`🎉 Sukses! File disimpan dengan nama: ${fileName}`);
+                    msg.reply(`✅ Foto masuk ke folder *${folderName}*\nNama file: \`${fileName}\``);
 
                 } catch (error) {
                     console.error('❌ Gagal memproses media:', error);
-                    msg.reply('❌ Terjadi kesalahan saat menyimpan foto ke Drive.');
+                    msg.reply('❌ Terjadi kesalahan saat memproses otomatisasi.');
                 }
             }
         }

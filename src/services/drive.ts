@@ -78,13 +78,21 @@ const getNewToken = (oAuth2Client: any) => {
 
 export const getOrCreateFolder = async (folderName: string, parentFolderId: string) => {
     if (!driveClient) throw new Error('Drive Client belum diinisialisasi');
+    
+    // Menjinakkan tanda kutip tunggal khusus untuk string pencarian
+    // Mengubah "Hu'u" menjadi "Hu\'u" agar query tidak rusak
+    const safeFolderName = folderName.replace(/'/g, "\\'");
+    
     const res = await driveClient.files.list({
-        q: `mimeType='application/vnd.google-apps.folder' and name='${folderName}' and '${parentFolderId}' in parents and trashed=false`,
+        q: `mimeType='application/vnd.google-apps.folder' and name='${safeFolderName}' and '${parentFolderId}' in parents and trashed=false`,
         fields: 'files(id, name)',
         spaces: 'drive',
     });
+    
     if (res.data.files && res.data.files.length > 0) return res.data.files[0].id;
 
+    // Saat proses pembuatan folder baru, tetap gunakan folderName asli 
+    // agar nama foldernya di Google Drive tetap normal (tanpa backslash)
     const folder = await driveClient.files.create({
         requestBody: { name: folderName, mimeType: 'application/vnd.google-apps.folder', parents: [parentFolderId] },
         fields: 'id',
