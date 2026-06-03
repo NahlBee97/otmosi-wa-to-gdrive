@@ -40,6 +40,7 @@ export const initializeDrive = async () => {
       });
       console.log("✅ Google Drive terhubung menggunakan OAuth 2.0");
     } else {
+      // Sekarang proses ini benar-benar ditunggu sampai selesai (Promise diselesaikan)
       const tokens = await getNewToken(oAuth2Client);
       if (tokens) {
         oAuth2Client.setCredentials(tokens);
@@ -58,38 +59,61 @@ export const initializeDrive = async () => {
   }
 };
 
-const getNewToken = async (oAuth2Client: any) => {
-  try {
+// 🛠️ PERBAIKAN 1: Membungkus fungsi dengan Promise agar bisa di-await oleh fungsi utama
+const getNewToken = (oAuth2Client: any): Promise<any> => {
+  return new Promise((resolve, reject) => {
     const authUrl = oAuth2Client.generateAuthUrl({
       access_type: "offline",
       scope: SCOPES,
     });
-    console.log("🔗 Buka URL ini di browser untuk memberikan akses:");
-    console.log(authUrl);
+
+    console.log("\n🔐 Otorisasi Google Drive Dibutuhkan:");
+    console.log("1. Buka URL ini di browser:\n", authUrl);
 
     const rl = readline.createInterface({
       input: process.stdin,
       output: process.stdout,
     });
-    const code: string = await new Promise((resolve) => {
-      rl.question("Masukkan kode otorisasi di sini: ", (answer) => {
+
+    rl.question(
+      "\n2. Paste SELURUH URL localhost hasil redirect ke sini:\n> ",
+      (input) => {
         rl.close();
-        resolve(answer.trim());
-      });
-    });
 
-    const tokenResponse = await oAuth2Client.getToken(code);
-    const tokens = tokenResponse.tokens || tokenResponse;
+        let code = input.trim();
 
-    const tokenFullPath = path.resolve(process.cwd(), TOKEN_PATH);
-    fs.writeFileSync(tokenFullPath, JSON.stringify(tokens));
-    console.log("✅ Token tersimpan di", tokenFullPath);
+        if (input.startsWith("http")) {
+          try {
+            const url = new URL(input);
+            code = url.searchParams.get("code") || input;
+          } catch (error) {
+            console.log(
+              "⚠️ Peringatan: Format URL tidak standar, mencoba menggunakan input mentah.",
+            );
+          }
+        }
 
-    return tokens;
-  } catch (err) {
-    console.error("❌ Gagal mendapatkan token baru:", err);
-    return null;
-  }
+        oAuth2Client.getToken(code, (err: any, token: any) => {
+          if (err) {
+            console.error(
+              "❌ Gagal mendapatkan token OAuth2:",
+              err.response?.data || err.message,
+            );
+            return reject(err); // Tolak Promise jika gagal
+          }
+          oAuth2Client.setCredentials(token);
+          fs.writeFileSync(TOKEN_PATH, JSON.stringify(token));
+          console.log(
+            "\n✅ Token berhasil disimpan! Sistem otentikasi Google Drive sudah pulih.",
+          );
+          console.log(
+            '👉 Silakan restart aplikasi dengan menekan Ctrl + C, lalu jalankan "npm run dev" kembali.\n',
+          );
+          resolve(token); // Kembalikan token agar bisa ditangkap oleh inisialisasi
+        });
+      },
+    );
+  });
 };
 
 export const getOrCreateFolder = async (
@@ -101,25 +125,20 @@ export const getOrCreateFolder = async (
 
   const cacheKey = `${parentFolderId}_${folderName}`;
 
-  // 1. Jika folder ini SEDANG dalam proses dicari/dibuat oleh foto lain, ikuti antrean tersebut
-  if (await folderCreationQueue[cacheKey]) {
+  // 🛠️ PERBAIKAN 2: Ambil referensi promise secara sinkronus tanpa await di dalam kondisi if
+  const pendingPromise = folderCreationQueue[cacheKey];
+  
+  if (pendingPromise) {
     console.log(
       `⏳ Menunggu folder '${folderName}' selesai diproses oleh antrean paralel...`,
     );
-    try {
-      return await folderCreationQueue[cacheKey];
-    } catch (err) {
-      // Jika antrean sebelumnya gagal, pastikan properti dihapus dan lempar ulang error
-      delete folderCreationQueue[cacheKey];
-      throw err;
-    }
+    // Langsung tunggu dan kembalikan referensi yang sudah kita amankan tadi
+    return await pendingPromise;
   }
 
-  // 2. Jika tidak ada di antrean, buat proses baru dan masukkan ke dalam antrean global
   folderCreationQueue[cacheKey] = (async () => {
     const safeFolderName = folderName.replace(/'/g, "\\'");
 
-    // Cek keberadaan folder di Drive
     const res = await driveClient.files.list({
       q: `mimeType='application/vnd.google-apps.folder' and name='${safeFolderName}' and '${parentFolderId}' in parents and trashed=false`,
       fields: "files(id, name)",
@@ -130,7 +149,6 @@ export const getOrCreateFolder = async (
       return res.data.files[0].id;
     }
 
-    // Jika benar-benar belum ada, buat baru
     console.log(
       `📂 Folder '${folderName}' tidak ditemukan. Membuat folder baru...`,
     );
@@ -146,11 +164,9 @@ export const getOrCreateFolder = async (
   })();
 
   try {
-    // Jalankan dan tunggu hingga selesai
     const folderId = await folderCreationQueue[cacheKey];
     return folderId;
   } finally {
-    // Setelah selesai (sukses/gagal), hapus dari antrean memori agar hemat resource
     delete folderCreationQueue[cacheKey];
   }
 };

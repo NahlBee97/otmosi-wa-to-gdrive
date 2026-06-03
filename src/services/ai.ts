@@ -33,7 +33,7 @@ export const generateImageDescription = async (buffer: Buffer, mimeType: string,
         // Beri jeda napas 3 detik sebelum menembak API Google agar terhindar dari limit 429
         await new Promise(resolve => setTimeout(resolve, 3000));
 
-        const model = genAI.getGenerativeModel({ model: 'gemini-3.5-flash' });
+        const model = genAI.getGenerativeModel({ model: 'gemini-3.1-flash-lite' });
         const imagePart = bufferToGenerativePart(buffer, mimeType);
         
         const daftarPilihanTeks = allowedList.map(item => `- ${item}`).join('\n');

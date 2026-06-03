@@ -77,11 +77,11 @@ export const initializeWhatsApp = () => {
             __dirname,
             "..",
             "data",
-            "dailyTreeCutting.json",
+            "nursery.json",
           );
           if (!fs.existsSync(dataPath)) {
             msg.reply(
-              "❌ File dailyTreeCutting.json tidak ditemukan!",
+              "❌ File nursery.json tidak ditemukan!",
             );
             return;
           }
@@ -93,7 +93,7 @@ export const initializeWhatsApp = () => {
           } catch (err) {
             console.error("❌ JSON parse error:", err);
             msg.reply(
-              "❌ File dailyTreeCutting.json berisi JSON tidak valid.",
+              "❌ File nursery.json berisi JSON tidak valid.",
             );
             return;
           }
